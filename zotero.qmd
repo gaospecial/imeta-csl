@@ -1,0 +1,255 @@
+# 使用 Zotero API
+
+## 批量更新文献的语言字段
+
+语言字段对于文献多语言格式的设置非常重要。例如使用中英文文献混排的，我们希望中文文献中使用类似 `张三 等` 的格式来缩写作者列表，而英文文献中使用类型 `Zhang et.al` 的格式来缩写作者列表。Zotero 默认并不提供批量更新语言字段的功能。我们可以通过 Zotero API 来实现这一功能。
+
+我们使用 R 来调用 Zotero API，具体代码如下：
+
+### 访问文献数据库
+
+使用 Zotero API 访问文献数据库，需要提供 Zotero 用户 ID 和 API Key。Zotero 用户 ID 和 API KEY 均可以在 Zotero 的[设置](https://www.zotero.org/settings/security)中找到和生成。请使用 `usethis::edit_r_environ()` 来设置环境变量 `ZOTERO_USER_ID` 和 `ZOTERO_API_KEY`。
+
+```{r}
+# 加载包
+library(httr)
+library(jsonlite)
+
+# Zotero API 的 URL
+user_id = Sys.getenv("ZOTERO_USER_ID")
+url <- paste0("https://api.zotero.org/users/", user_id, "/items/top?format=json")
+
+# Zotero API 的 key
+key <- Sys.getenv("ZOTERO_API_KEY")
+
+# 获取文献列表
+response <- GET(url, add_headers("Zotero-API-Key" = key))
+items <- content(response, as = "text", encoding = "UTF-8") |> fromJSON()
+
+# 查看数据结构
+str(items)
+```
+
+每个文献的 `language` 字段表示该文献的语言，保存在 `data$language` 中：
+
+```{r}
+# 查看文献的语言字段
+items$data$language
+```
+
+
+### 获取全部的文献列表
+
+Zotero 默认输出 25 条文献，最大可以设置为 100 条。如果需要获取全部的文献，可以使用 `Zotero API` 的 `limit` 参数和 `start` 参数。
+
+```{r}
+# 获取全部的文献列表
+items_all = items
+start = 25
+while (TRUE) {
+  url_all <- paste0("https://api.zotero.org/users/", user_id, "/items/top?format=json&limit=100&start=", start)
+  response_all <- GET(url_all, add_headers("Zotero-API-Key" = key))
+  batch_result = content(response_all, as = "text", encoding = "UTF-8") |> fromJSON()
+  items_all <- rbind(items_all, batch_result)
+  start = start + 100
+  if (nrow(batch_result) < 100) {
+    break
+  }
+  Sys.sleep(1) # 限制 API 访问频率
+}
+```
+
+### 访问本地数据库
+
+因为使用 Zotero API 很容易因为连接问题中断，所以不如直接通过读取 Zotero 的数据库文件来获取全部的文献列表。Zotero 的数据库文件位于 Zotero 的安装目录下。使用 `RSQLite` 包可以方便地读取 Zotero 的数据库文件。
+
+```{r}
+# 加载包
+library(RSQLite)
+
+# 使用 dbplyr 读取 Zotero 数据库
+library(dplyr)
+library(dbplyr)
+library(stringr)
+db <- dbConnect(RSQLite::SQLite(), "/Users/gaoch/Zotero/zotero.sqlite")
+
+# 列出数据库中的 table
+dbListTables(db)
+```
+
+```{r}
+# language field id
+fields = tbl(db, "fields")
+field_id = tbl(db, "fields") |> 
+  filter(fieldName %in% c("language", "title"))
+field_id
+```
+
+```{r}
+# 几个需要用到的数据表
+items = tbl(db, "items")
+item_data = tbl(db, "itemData") 
+item_data_values = tbl(db, "itemDataValues")
+
+# 查询标题
+item_data_title = item_data |> 
+  filter(fieldID == 1) |> 
+  left_join(item_data_values) |> 
+  collect()
+
+# 查询语言
+item_data_language = item_data |>
+  filter(fieldID == 7) |>
+  left_join(item_data_values) |> 
+  collect()
+```
+
+```{r}
+item_data_language |> 
+  pull(value) |> 
+  table()  |>
+  sort(decreasing = TRUE) |> 
+  barplot()
+```
+
+```{r}
+item_data_language_2 <- item_data_title  |> 
+  mutate(language = case_when(
+    str_length(str_remove_all(value, "[a-zA-Z0-9:punct:]+")) < str_length(value)/3 ~ "en",
+    TRUE ~ "zh"
+  ))
+```
+
+```{r}
+items  |> pull(language) |> table() |> sort(decreasing = TRUE) |> barplot()
+```
+
+
+
+
+```{r}
+# 关闭数据库连接
+dbDisconnect(db)
+```
+
+### 查找未设置语言的文献
+
+```{r}
+# 筛选语言字段为空的文献
+library(dplyr)
+library(stringr)
+items_unk = items  |> 
+  filter(.data$data$language == "")
+  
+data = items_unk |> 
+  pull(data)  |> 
+  as_tibble() |> 
+  # 根据标题判断是否为英文文献
+  filter(str_length(str_remove_all(title, "[a-zA-Z0-9:punct:]+")) < str_length(title)/3)
+
+print(data)
+```
+
+### 更新文献的语言字段
+
+#### 单独更新
+
+单独更新条目时：
+
+- URL: `"https://api.zotero.org/users/user_id/items/key"`
+- 请求方法: `PATCH`
+
+
+```{r}
+# 更新使用的 API 接口
+item_key = data$key[[1]]
+item_version = data$version[[1]]
+url_single = paste0("https://api.zotero.org/users/", user_id, "/items/", item_key)
+
+# 更新文献的语言字段
+response = PATCH(url_single, add_headers("Zotero-API-Key" = key), body = list(language = "en", version = item_version), encode = "json")
+
+# 处理响应
+if (str_detect(response$status_code, "^2")) {
+  print(paste0("更新文献 ", item_key, " 成功"))
+} else {
+  print(paste0("更新文献 ", item_key, " 失败"))
+  message(content(response, as = "text", encoding = "UTF-8"))
+}
+```
+
+#### 批量更新
+
+最多可以在单个请求中更新 50 个集合、保存的搜索或项目。
+
+在每个对象中包含一个 `key` 和 `version` 属性，使用 POST 发送请求。
+
+```json
+[
+  {
+    "key": "BD85JEM4",
+    "version": 414,
+    "language": "en",
+  },
+  {
+    "key": "MNC5SAPD",
+    "version": 416
+    "language": "zh"
+  }
+]
+```
+
+```
+POST <userOrGroupPrefix>/items
+Content-Type: application/json
+```
+
+
+
+```{r}
+# 更新使用的 API 接口
+url_batch = paste0("https://api.zotero.org/users/", user_id, "/items")
+
+# 拆分为 50 个一组的批处理任务
+n = ceiling(nrow(data) / 50)
+for (i in 1:n) {
+  item_batch = data[(i-1)*50 + 1:min(i*50, nrow(data)), ] |> 
+    mutate(language = "en") |> 
+    select(key, version, language) |> 
+    toJSON(auto_unbox = TRUE, pretty = TRUE)
+  # 更新文献
+  response <- POST(url_batch, add_headers("Zotero-API-Key" = key), body = item_batch, encode = "json")
+
+  # 处理相应
+  if (!str_detect(response$status_code, "^2")) {
+    print(paste0("更新文献失败"))
+    message(content(response, as = "text", encoding = "UTF-8"))
+  }
+}
+```
+
+```{r}
+# 更新文献的语言字段
+for (item in items) {
+  if (item$language == "zh-CN") {
+    item$language <- "zh"
+      print(paste0("更新文献 ", item_key, " 失败"))
+      message(content(response, as = "text", encoding = "UTF-8"))
+    }
+}
+```
+
+
+
+```{r}
+# 更新文献的语言字段
+# 更新文献的语言字段
+for (item in items) {
+  if (item$language == "zh-CN") {
+    item$language <- "zh"
+  }
+  # 更新文献
+  response <- PUT(url, add_headers("Zotero-API-Key" = key), body = toJSON(item), encode = "json")
+}
+
+```
