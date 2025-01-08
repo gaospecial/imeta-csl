@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <style xmlns="http://purl.org/net/xbiblio/csl" version="1.0" class="in-text" name-as-sort-order="all" sort-separator=" " demote-non-dropping-particle="never" initialize-with=" " initialize-with-hyphen="false" page-range-format="expanded" default-locale="zh-CN">
   <info>
-    <title>China National Standard GB/T 7714-2015 (author-date, 中文)</title>
-    <id>http://www.zotero.org/styles/china-national-standard-gb-t-7714-2015-author-date</id>
+    <title>China National Standard GB/T 7714-2015 (author-date, 中英文)</title>
+    <id>http://www.zotero.org/styles/china-national-standard-gb-t-7714-2015-author-date-multi-lang</id>
     <link href="http://www.zotero.org/styles/china-national-standard-gb-t-7714-2015-author-date" rel="self"/>
     <link href="http://www.zotero.org/styles/china-national-standard-gb-t-7714-2015-numeric" rel="template"/>
     <link href="https://std.samr.gov.cn/gb/search/gbDetailed?id=71F772D8055ED3A7E05397BE0A0AB82A" rel="documentation"/>
@@ -29,19 +29,21 @@
     <terms>
       <term name="anonymous" form="short">佚名</term>
       <term name="edition" form="short">版</term>
+      <term name="et-al">等</term>
       <term name="open-quote">“</term>
       <term name="close-quote">”</term>
       <term name="open-inner-quote">‘</term>
       <term name="close-inner-quote">’</term>
     </terms>
   </locale>
-  <locale>
+  <locale xml:lang="en">
     <date form="numeric">
       <date-part name="year" range-delimiter="/"/>
       <date-part name="month" form="numeric-leading-zeros" prefix="-" range-delimiter="/"/>
       <date-part name="day" form="numeric-leading-zeros" prefix="-" range-delimiter="/"/>
     </date>
     <terms>
+      <term name="et-al">et al.</term>
       <term name="page-range-delimiter">-</term>
     </terms>
   </locale>
@@ -69,7 +71,7 @@
   <macro name="author-intext">
     <names variable="author">
       <name form="short"/>
-      <!-- 国标 10.2.2 节要求姓氏与“et al.”“等”之间留适当空隙 -->
+      <et-al term="et-al" font-style="normal" font-weight="normal"/>
       <substitute>
         <names variable="composer"/>
         <names variable="illustrator"/>
@@ -442,7 +444,12 @@
   </macro>
   <citation et-al-min="2" et-al-use-first="1" disambiguate-add-year-suffix="true" disambiguate-add-names="true" disambiguate-add-givenname="true" givenname-disambiguation-rule="primary-name-with-initials" collapse="year">
     <!-- 取消这部分注释可以开启 CSL-M 的多语言功能：按照文献的语言输出“et al.”等术语 -->
-    <layout prefix="(" suffix=")" delimiter="; " locale="en"><group delimiter=", "><text macro="author-intext"/><text macro="issued-year"/></group></layout>
+    <layout prefix="(" suffix=")" delimiter="; " locale="en">
+      <group delimiter=", ">
+        <text macro="author-intext"/>
+        <text macro="issued-year"/>
+      </group>
+    </layout>
     <layout prefix="(" suffix=")" delimiter="; ">
       <group delimiter=", ">
         <text macro="author-intext"/>
