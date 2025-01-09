@@ -1,0 +1,136 @@
+# Zotero 数据库
+
+## 访问本地数据库
+
+因为使用 Zotero API 很容易因为连接问题中断，所以不如直接通过读取 Zotero 的数据库文件来获取全部的文献列表。Zotero 的数据库文件位于 Zotero 的安装目录下。使用 `RSQLite` 包可以方便地读取 Zotero 的数据库文件。
+
+```{r}
+# 加载包
+library(RSQLite)
+
+# 使用 dbplyr 读取 Zotero 数据库
+library(dplyr)
+library(dbplyr)
+library(stringr)
+db <- dbConnect(RSQLite::SQLite(), "/Users/gaoch/Zotero/zotero.sqlite")
+
+# 列出数据库中的 table
+dbListTables(db)
+```
+
+Zotero 的 SQLite 数据库有 61 个表。其中 `items` 表存储了所有的文献条目，`itemData` 表存储了文献条目的元数据，`itemDataValues` 表存储了元数据的值。`fields` 表存储了所有可用的字段信息。我们只需要查询文献的标题、语言、KEY、version 等信息。
+
+```{r}
+# language field id
+fields = tbl(db, "fields")
+
+# 查询
+field_id = tbl(db, "fields") |> 
+  filter(fieldName %in% c("language", "title"))
+field_id
+```
+
+
+```{r}
+# 几个需要用到的数据表
+(items = tbl(db, "items") |> collect())
+(item_data = tbl(db, "itemData"))
+(item_data_values = tbl(db, "itemDataValues"))
+
+# 查询标题
+item_data_title = item_data |> 
+  filter(fieldID == 1) |> 
+  left_join(item_data_values) |> 
+  collect()
+
+# 查询语言
+item_data_language = item_data |>
+  filter(fieldID == 7) |>
+  left_join(item_data_values) |> 
+  collect()
+```
+
+当前文献的语言字段的取值如下图所示：
+
+```{r}
+#| label: fig-item-language
+item_data_language |> 
+  pull(value) |> 
+  table()  |>
+  sort(decreasing = TRUE) |> 
+  barplot()
+```
+
+```{r}
+no_valid_items <- item_data_language |>
+  filter(!value %in% c("en", "zh"))
+
+data = item_data_title  |> 
+  filter(itemID %in% no_valid_items$itemID) |>
+  mutate(language = case_when(
+    str_length(str_remove_all(value, "[a-zA-Z0-9:punct:]+")) < str_length(value)/3 ~ "en",
+    .default = "zh"
+  ))  |> 
+  select(itemID, language) |>
+  left_join(items) |> 
+  select(key, version, language)
+```
+
+```{r}
+# 关闭数据库连接
+dbDisconnect(db)
+```
+
+## 使用 API 更新文献
+
+根据[官方文档](https://www.zotero.org/support/dev/client_coding/direct_sqlite_database_access)的指引，最好不要直接更新数据库，而是通过 API 来更新文献。
+
+
+
+```{r}
+#| eval: false
+library(jsonlite)
+library(httr)
+# Zotero API 的 URL
+user_id = Sys.getenv("ZOTERO_USER_ID")
+key <- Sys.getenv("ZOTERO_API_KEY")
+
+# 更新使用的 API 接口
+url_batch = paste0("https://api.zotero.org/users/", user_id, "/items")
+
+# 拆分为 50 个一组的批处理任务
+n = ceiling(nrow(data) / 50)
+for (i in 1:n) {
+  # 获取当前批次的文献
+  data_batch = data[((i-1)*50 + 1):min(i*50, nrow(data)), ]
+  item_batch = data_batch |> 
+    select(key, version, language) |> 
+    toJSON(auto_unbox = TRUE, pretty = TRUE)
+  # 更新文献
+  response <- POST(url_batch, add_headers("Zotero-API-Key" = key), body = item_batch, encode = "json")
+
+  # 处理相应
+  if (str_detect(response$status_code, "^2")) {
+    print(glue::glue("更新{nrow(data_batch)}篇文献成功！"))
+  } else {
+    print(glue::glue("更新{nrow(data_batch)}篇文献失败！"))
+    message(content(response, as = "text", encoding = "UTF-8"))
+  }
+}
+```
+
+```
+更新50篇文献成功！
+更新50篇文献成功！
+更新50篇文献成功！
+更新50篇文献成功！
+更新50篇文献成功！
+更新50篇文献成功！
+更新50篇文献成功！
+更新50篇文献成功！
+更新50篇文献成功！
+更新50篇文献成功！
+更新50篇文献成功！
+更新50篇文献成功！
+更新41篇文献成功！
+```
