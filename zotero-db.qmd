@@ -71,9 +71,9 @@ data = item_data_title  |>
     str_length(str_remove_all(value, "[a-zA-Z0-9:punct:]+")) < str_length(value)/3 ~ "en",
     .default = "zh"
   ))  |> 
-  select(itemID, language) |>
+  select(itemID, language, value) |>
   left_join(items) |> 
-  select(key, version, language)
+  select(key, version, language, value)
 ```
 
 ```{r}
